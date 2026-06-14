@@ -1,0 +1,14 @@
+# Local scrape output — passages get uploaded to the benchmark repo, not committed here
+data/passages.jsonl
+data/passages*.jsonl
+data/raw/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+
+# OS
+.DS_Store

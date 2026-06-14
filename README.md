@@ -1,30 +1,78 @@
-# Kazakh OOD Confirmatory Benchmark
+# Kazakh OOD Confirmatory Benchmark — Data Collection
 
-Confirmatory out-of-distribution evaluation set for Kazakh retrieval — built to verify that conclusions from the primary [Wikipedia-based benchmark](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) (n=300) and the native-validated semantic-gap subset (n=127, Sprint 3) generalize to non-encyclopedic Kazakh text.
+Workspace for collecting a held-out, out-of-distribution Kazakh corpus from official sources, to be uploaded into the [primary benchmark repository](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) as a confirmatory test set.
 
 ## Purpose
 
-The Wikipedia benchmark establishes the primary result: lexical retrieval with Kazakh morphological normalization beats naive multilingual dense embeddings, and a hybrid BM25+stemmer ⊕ dense pipeline gives the best measured performance. This dataset is a **confirmatory test**: do the same systems retain their relative ranking on text from a different domain and register?
-
-A held-out, independently sourced benchmark de-risks the published results against a likely reviewer objection: *"do your conclusions depend on Wikipedia-specific style?"*
+The primary benchmark (Wikipedia, n=300) establishes the headline results. This corpus answers the natural reviewer question: *do the same conclusions hold on text from a different domain and register?* The new corpus comes from presidential and government addresses — formal Kazakh, distinct from encyclopedic style.
 
 ## Sources
 
-Two Kazakh public-domain corpora with distinct registers:
+Both are Kazakh public-domain content with stable per-document URLs:
 
-- **akorda.kz** — official presidential office: addresses, speeches, articles
-- **nazarbayev.kz** — N. Nazarbayev Foundation: articles and speeches
+- **akorda.kz** — Office of the President of Kazakhstan: speeches (`/kz/speeches`)
+- **nazarbayev.kz** — N. Nazarbayev Foundation: speeches, interviews, addresses (`/kk/soylegen-sozder-suhbattar-men-zholdaular-26104624`)
 
-Specific sections to be selected manually to avoid press releases and ensure substantive text. Sections list is curated, not bulk-scraped.
+## Pipeline
 
-## Target
+This repo only handles **passage collection**. Query generation and relevance judgments happen separately and land in the benchmark repo.
 
-- ~150 native-speaker-validated query–passage pairs (collect ~200–220 candidates, expect 20–25% drop during validation)
-- Passages chunked at ~120 words, consistent with the primary benchmark
-- Category structure: TBD (to mirror the primary benchmark, or focus on the validated semantic-gap design from Sprint 3)
+```
+URLs list  →  scrape  →  clean + chunk  →  passages.jsonl  →  (upload to benchmark repo)
+```
 
-## Relationship to other repositories
+### Usage
 
-- [`Kaz-RAG-search-benchmark`](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) — primary benchmark (Wikipedia, n=300)
-- Sprint 3 semantic-gap subset (n=127) — native-validated, low lexical overlap
-- This repo — confirmatory OOD benchmark (akorda + nazarbayev)
+```bash
+pip install requests beautifulsoup4
+
+# 1. Verify parsers on offline samples (no network)
+python scripts/scrape.py --test
+
+# 2. Edit data/urls.txt — add ~22 speech URLs (one per line)
+
+# 3. Scrape
+python scripts/scrape.py --urls data/urls.txt --out data/passages.jsonl
+
+# 4. Upload data/passages.jsonl to the benchmark repository
+```
+
+### Output schema
+
+One JSON object per line:
+
+```json
+{
+  "id": "akorda_001_p03",
+  "source": "akorda",
+  "url": "https://akorda.kz/kz/...",
+  "title": "Мемлекет басшысы ...",
+  "date": "20 наурыз 2020",
+  "passage_idx": 3,
+  "text": "..."
+}
+```
+
+- `id`: `{source}_{doc_index}_p{passage_index}`
+- `date`: extracted where available (nazarbayev.kz has it in breadcrumbs; akorda.kz does not expose it in article HTML, so left `null`)
+- Passages are ~120 words with 20-word overlap, same chunking convention as the primary benchmark
+
+## Repo contents
+
+```
+scripts/scrape.py    — scraper with per-site parsers, chunking, offline test mode
+data/samples/        — two HTML fixtures used by --test (committed for reproducibility)
+data/urls.txt        — list of speech URLs to scrape (fill in manually)
+data/passages.jsonl  — output (gitignored; lands in the benchmark repo)
+```
+
+## Why scraping is run locally
+
+Outbound HTTPS to `akorda.kz` and `nazarbayev.kz` is blocked from cloud Claude environments (HTTP 403). The script is designed to run on your local machine; only the offline `--test` mode runs in any environment.
+
+## Next steps after collection
+
+1. Upload `passages.jsonl` to the [benchmark repo](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) under a new partition (e.g. `confirmatory/`)
+2. Generate query candidates per passage via a free LLM API (Groq Llama 3.3 / Gemini Flash)
+3. Native-speaker validation: keep / rewrite / drop (target ≈150 final pairs)
+4. Re-run the existing dense/lexical pipelines on the new partition and compare category-level rankings against Wikipedia-n=300 results

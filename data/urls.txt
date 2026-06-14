@@ -1,0 +1,11 @@
+# One URL per line. Lines starting with # are ignored.
+# Auto-detected domain → corresponding parser (akorda.kz / nazarbayev.kz).
+#
+# Target: ~22 speeches total (7 from nazarbayev.kz, ~15 from akorda.kz)
+# Expected output: ~200–240 passages → enough for ~150 native-validated queries.
+
+# --- nazarbayev.kz (7 speeches, all available from /kk/speeches) ---
+# https://nazarbayev.kz/kk/speeches/...
+
+# --- akorda.kz (~15 speeches from /kz/speeches) ---
+# https://akorda.kz/kz/...
