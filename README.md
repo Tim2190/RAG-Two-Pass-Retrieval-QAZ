@@ -70,6 +70,46 @@ data/passages.jsonl  — output (gitignored; lands in the benchmark repo)
 
 Outbound HTTPS to `akorda.kz` and `nazarbayev.kz` is blocked from cloud Claude environments (HTTP 403). The script is designed to run on your local machine; only the offline `--test` mode runs in any environment.
 
+## The dataset (already built)
+
+The collected and auto-validated dataset is committed under `data/`:
+
+| File | What |
+|------|------|
+| `data/passages.jsonl` | 471 passages from 15 akorda.kz speeches (the corpus / search index) |
+| `data/queries.jsonl` | 244 queries, 3 categories (factoid / paraphrase / low_overlap) |
+| `data/qrels.jsonl` | binary relevance judgments (query → gold passage) |
+| `data/queries_editable.csv` | **human-editable** review sheet (one row per query + passage text) |
+| `data/review_flagged.csv` | 68 queries dropped during auto-validation (model drifted from passage) |
+
+**Validation done automatically:** every query's evidence quote is a verbatim
+substring of the real corpus passage; query↔passage lexical overlap is computed
+per query. Mean overlap per category: factoid 0.79, paraphrase 0.36, low_overlap
+0.32 — a clean three-tier difficulty gradient mirroring the primary benchmark.
+
+**The one thing only a native speaker can check** is Kazakh grammaticality /
+naturalness. To do that, open `data/queries_editable.csv` in Google Sheets:
+
+1. Each row = one query, with its `passage_text` alongside for context.
+2. Set `keep` to `FALSE` to drop a query; edit the `query` cell to fix wording.
+3. Download as CSV, then rebuild the JSONL:
+
+```bash
+python scripts/queries.py rebuild \
+    --edited data/queries_editable.csv \
+    --queries-out data/queries.jsonl \
+    --qrels-out data/qrels.jsonl
+```
+
+Then upload `passages.jsonl` + `queries.jsonl` + `qrels.jsonl` to the benchmark repo.
+
+> Tip: `data/queries.jsonl` carries an `overlap` field. For a strict semantic-gap
+> subset (à la Sprint 3), filter `low_overlap` queries with `overlap < 0.30`.
+
+---
+
+## How the dataset was built (reproducing from scratch)
+
 ## Query generation (Gemini 2.0 Flash, free tier)
 
 After `passages.jsonl` is collected, generate query candidates via `scripts/queries.py`.

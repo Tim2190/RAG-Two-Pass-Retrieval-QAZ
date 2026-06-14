@@ -262,14 +262,62 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             w.writeheader()
             w.writerows(review_out)
 
+    # Human-editable CSV: one row per accepted query, with passage text for context.
+    # Open in Google Sheets, set keep=FALSE to drop, edit `query` inline, then run `rebuild`.
+    with args.editable_out.open("w", encoding="utf-8", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=["keep", "query_id", "type", "query", "overlap",
+                                          "passage_id", "evidence", "passage_text"])
+        w.writeheader()
+        for q, r in zip(queries_out, qrels_out):
+            w.writerow({
+                "keep": "TRUE", "query_id": q["query_id"], "type": q["type"],
+                "query": q["query"], "overlap": q["overlap"],
+                "passage_id": r["passage_id"], "evidence": "",
+                "passage_text": _norm(corpus[r["passage_id"]]),
+            })
+
     total = sum(accepted.values())
     print(f"Passages in TSV: {len(rows)} | auto-accepted queries: {total} | flagged for review: {flagged}", file=sys.stderr)
     for qtype in types:
         print(f"  {qtype}: {accepted[qtype]}", file=sys.stderr)
-    print(f"\n  queries → {args.queries_out}", file=sys.stderr)
-    print(f"  qrels   → {args.qrels_out}", file=sys.stderr)
+    print(f"\n  queries  → {args.queries_out}", file=sys.stderr)
+    print(f"  qrels    → {args.qrels_out}", file=sys.stderr)
+    print(f"  editable → {args.editable_out}  (review/edit in Sheets, then 'rebuild')", file=sys.stderr)
     if review_out:
-        print(f"  review  → {args.review_out}  ({flagged} flagged; Gemini drifted from passage)", file=sys.stderr)
+        print(f"  flagged  → {args.review_out}  ({flagged} dropped; Gemini drifted from passage)", file=sys.stderr)
+    return 0
+
+
+def cmd_rebuild(args: argparse.Namespace) -> int:
+    """Rebuild queries.jsonl + qrels.jsonl from the edited human-review CSV.
+    Keeps rows where `keep` is truthy; uses the (possibly edited) query text."""
+    queries_out, qrels_out = [], []
+    kept = dropped = 0
+    with args.edited.open("r", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if not is_true(row.get("keep", "")):
+                dropped += 1
+                continue
+            query = (row.get("query") or "").strip()
+            pid = (row.get("passage_id") or "").strip()
+            if not query or not pid:
+                dropped += 1
+                continue
+            qid = (row.get("query_id") or f"ood_q{kept + 1:04d}").strip()
+            queries_out.append({"query_id": qid, "query": query,
+                                "type": (row.get("type") or "").strip(), "source": "akorda"})
+            qrels_out.append({"query_id": qid, "passage_id": pid, "relevance": 1})
+            kept += 1
+
+    args.queries_out.parent.mkdir(parents=True, exist_ok=True)
+    with args.queries_out.open("w", encoding="utf-8") as f:
+        for q in queries_out:
+            f.write(json.dumps(q, ensure_ascii=False) + "\n")
+    with args.qrels_out.open("w", encoding="utf-8") as f:
+        for r in qrels_out:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    print(f"Rebuilt from {args.edited}: kept {kept}, dropped {dropped}", file=sys.stderr)
+    print(f"  queries → {args.queries_out}\n  qrels   → {args.qrels_out}", file=sys.stderr)
     return 0
 
 
@@ -345,7 +393,14 @@ def main() -> int:
     ing.add_argument("--queries-out", type=Path, default=Path("data/queries.jsonl"))
     ing.add_argument("--qrels-out", type=Path, default=Path("data/qrels.jsonl"))
     ing.add_argument("--review-out", type=Path, default=Path("data/review_flagged.csv"))
+    ing.add_argument("--editable-out", type=Path, default=Path("data/queries_editable.csv"))
     ing.set_defaults(func=cmd_ingest)
+
+    reb = sub.add_parser("rebuild", help="Rebuild JSONL from the edited human-review CSV")
+    reb.add_argument("--edited", type=Path, required=True, help="Edited queries_editable.csv")
+    reb.add_argument("--queries-out", type=Path, default=Path("data/queries.jsonl"))
+    reb.add_argument("--qrels-out", type=Path, default=Path("data/qrels.jsonl"))
+    reb.set_defaults(func=cmd_rebuild)
 
     fin = sub.add_parser("finalize", help="Convert validated CSV to queries.jsonl + qrels.jsonl")
     fin.add_argument("--reviewed", type=Path, required=True)

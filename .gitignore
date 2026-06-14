@@ -1,22 +1,12 @@
-# Local scrape output — passages get uploaded to the benchmark repo, not committed here
-data/passages.jsonl
-data/passages*.jsonl
-data/raw/
-
-# Query generation artifacts — also live in the benchmark repo
-data/candidates*.csv
-data/queries.jsonl
-data/qrels.jsonl
-
-# Secrets
-.env
-
 # Python
 __pycache__/
 *.pyc
 .venv/
 venv/
+
+# Secrets
 .env
 
-# OS
-.DS_Store
+# Raw scrape intermediates (not the final dataset)
+data/raw/
+data/candidates*.csv
