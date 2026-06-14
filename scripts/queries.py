@@ -176,6 +176,103 @@ def cmd_generate(args: argparse.Namespace) -> int:
     return 0
 
 
+# ---------- ingest (auto-validate a Gemini TSV against the corpus) ----------
+
+def _norm(s: str) -> str:
+    s = re.sub(r"\s+", " ", s.strip())
+    for a, b in (("«", '"'), ("»", '"'), ("“", '"'), ("”", '"'),
+                 ("–", "-"), ("—", "-"), ("’", "'")):
+        s = s.replace(a, b)
+    return s
+
+
+def _content_stems(s: str) -> list[str]:
+    words = re.findall(r"[а-яёәғқңөұүһіА-ЯЁӘҒҚҢӨҰҮҺІ]+", s.lower())
+    return [w[:5] for w in words if len(w) >= 3]
+
+
+def _overlap(query: str, passage: str) -> float:
+    qs = set(_content_stems(query))
+    if not qs:
+        return 0.0
+    ps = set(_content_stems(passage))
+    return sum(1 for w in qs if w in ps) / len(qs)
+
+
+def cmd_ingest(args: argparse.Namespace) -> int:
+    """Auto-validate a Gemini TSV against the corpus: accept a (passage, type)
+    query iff its evidence is a verbatim substring of the real corpus passage."""
+    corpus: dict[str, str] = {}
+    for line in args.passages.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            d = json.loads(line)
+            corpus[d["id"]] = d["text"]
+
+    rows = []
+    with args.tsv.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.reader(f, delimiter="\t")
+        next(reader, None)  # header
+        for r in reader:
+            if len(r) >= 8 and r[0] != "passage_id":  # drop embedded header repeats
+                rows.append(r)
+
+    types = ("factoid", "paraphrase", "low_overlap")
+    queries_out, qrels_out, review_out = [], [], []
+    counter = 1
+    accepted = defaultdict(int)
+    flagged = 0
+
+    for r in rows:
+        pid = r[0]
+        if pid not in corpus:
+            continue
+        real = _norm(corpus[pid])
+        for i, qtype in enumerate(types):
+            query = _norm(r[2 + i * 2])
+            evidence = _norm(r[3 + i * 2])
+            if not query or query in {"-", ""}:
+                continue
+            ev_ok = bool(evidence) and evidence in real
+            if ev_ok:
+                qid = f"ood_q{counter:04d}"
+                counter += 1
+                queries_out.append({
+                    "query_id": qid, "query": query, "type": qtype,
+                    "source": "akorda", "overlap": round(_overlap(query, real), 3),
+                })
+                qrels_out.append({"query_id": qid, "passage_id": pid, "relevance": 1})
+                accepted[qtype] += 1
+            else:
+                flagged += 1
+                review_out.append({
+                    "passage_id": pid, "type": qtype, "query": query,
+                    "evidence": evidence, "reason": "evidence_not_in_corpus_passage",
+                })
+
+    args.queries_out.parent.mkdir(parents=True, exist_ok=True)
+    with args.queries_out.open("w", encoding="utf-8") as f:
+        for q in queries_out:
+            f.write(json.dumps(q, ensure_ascii=False) + "\n")
+    with args.qrels_out.open("w", encoding="utf-8") as f:
+        for r in qrels_out:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+    if review_out:
+        with args.review_out.open("w", encoding="utf-8", newline="") as f:
+            w = csv.DictWriter(f, fieldnames=["passage_id", "type", "query", "evidence", "reason"])
+            w.writeheader()
+            w.writerows(review_out)
+
+    total = sum(accepted.values())
+    print(f"Passages in TSV: {len(rows)} | auto-accepted queries: {total} | flagged for review: {flagged}", file=sys.stderr)
+    for qtype in types:
+        print(f"  {qtype}: {accepted[qtype]}", file=sys.stderr)
+    print(f"\n  queries → {args.queries_out}", file=sys.stderr)
+    print(f"  qrels   → {args.qrels_out}", file=sys.stderr)
+    if review_out:
+        print(f"  review  → {args.review_out}  ({flagged} flagged; Gemini drifted from passage)", file=sys.stderr)
+    return 0
+
+
 # ---------- finalize ----------
 
 def is_true(value: str) -> bool:
@@ -241,6 +338,14 @@ def main() -> int:
     gen.add_argument("--delay", type=float, default=4.5, help="Seconds between API calls (free tier ~15 RPM)")
     gen.add_argument("--seed", type=int, default=42)
     gen.set_defaults(func=cmd_generate)
+
+    ing = sub.add_parser("ingest", help="Auto-validate a Gemini TSV against the corpus (evidence-verbatim check)")
+    ing.add_argument("--tsv", type=Path, required=True, help="Gemini tab-separated output")
+    ing.add_argument("--passages", type=Path, required=True, help="Original passages.jsonl corpus")
+    ing.add_argument("--queries-out", type=Path, default=Path("data/queries.jsonl"))
+    ing.add_argument("--qrels-out", type=Path, default=Path("data/qrels.jsonl"))
+    ing.add_argument("--review-out", type=Path, default=Path("data/review_flagged.csv"))
+    ing.set_defaults(func=cmd_ingest)
 
     fin = sub.add_parser("finalize", help="Convert validated CSV to queries.jsonl + qrels.jsonl")
     fin.add_argument("--reviewed", type=Path, required=True)
