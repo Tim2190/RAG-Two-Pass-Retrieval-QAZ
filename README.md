@@ -106,6 +106,17 @@ Then upload `passages.jsonl` + `queries.jsonl` + `qrels.jsonl` to the benchmark 
 > Tip: `data/queries.jsonl` carries an `overlap` field. For a strict semantic-gap
 > subset (à la Sprint 3), filter `low_overlap` queries with `overlap < 0.30`.
 
+### Pre-built difficulty subsets via the `overlap` field
+
+| Subset | Filter | Count | Composition |
+|--------|--------|------:|-------------|
+| Strict semantic-gap (Sprint 3 style) | `overlap < 0.30` | 68 | low_overlap 40 + paraphrase 26 + factoid 2 |
+| Paraphrase zone | `0.30 ≤ overlap < 0.50` | 69 | paraphrase 38 + low_overlap 27 + factoid 4 |
+| Factoid-like (keyword match) | `overlap ≥ 0.50` | 107 | factoid 75 + paraphrase 17 + low_overlap 15 |
+| Full confirmatory set | — | 244 | factoid 81 + paraphrase 81 + low_overlap 82 |
+
+One collection, three difficulty regimes — no extra sampling work needed.
+
 ---
 
 ## How the dataset was built (reproducing from scratch)
