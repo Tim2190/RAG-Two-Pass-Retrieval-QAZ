@@ -70,9 +70,68 @@ data/passages.jsonl  — output (gitignored; lands in the benchmark repo)
 
 Outbound HTTPS to `akorda.kz` and `nazarbayev.kz` is blocked from cloud Claude environments (HTTP 403). The script is designed to run on your local machine; only the offline `--test` mode runs in any environment.
 
+## Query generation (Gemini 2.0 Flash, free tier)
+
+After `passages.jsonl` is collected, generate query candidates via `scripts/queries.py`.
+
+### 1. Get a free Gemini API key
+
+`https://aistudio.google.com/app/apikey` → "Create API key" (free, no card).
+Set it as env var (in Colab: `os.environ['GEMINI_API_KEY'] = '...'`).
+
+### 2. Install dependency and generate
+
+```bash
+pip install google-generativeai
+
+GEMINI_API_KEY=... python scripts/queries.py generate \
+    --passages data/passages.jsonl \
+    --per-doc 7 \
+    --out data/candidates.csv
+```
+
+For 15 documents × 7 passages/doc × 3 query types = ~315 candidates.
+Free tier (15 RPM) → ~35 minutes. Daily free quota (1500 req) is fine.
+
+### 3. Native-speaker validation in Google Sheets
+
+Open `candidates.csv` in Google Sheets. For each row, three candidate queries
+(`q_factoid`, `q_paraphrase`, `q_low_overlap`) with `evidence` quotes from the passage.
+
+- `ev_*_ok` column auto-flags whether the evidence is a literal substring of the
+  passage (TRUE / FALSE). FALSE = model hallucinated the evidence; usually drop.
+- Fill `accept_factoid`, `accept_paraphrase`, `accept_low_overlap` with TRUE/FALSE
+  for each candidate.
+- Edit the query text if it's almost-right; the corrected version is what gets used.
+- `notes` is free-form.
+
+Target: ~150 accepted query-passage pairs after validation.
+
+### 4. Finalize to JSONL
+
+Download the validated sheet as CSV, then:
+
+```bash
+python scripts/queries.py finalize \
+    --reviewed data/candidates_reviewed.csv \
+    --queries-out data/queries.jsonl \
+    --qrels-out data/qrels.jsonl
+```
+
+Output schemas:
+
+```json
+// queries.jsonl
+{"query_id": "ood_q0001", "query": "...", "type": "factoid", "source": "akorda"}
+
+// qrels.jsonl  (binary multi-gold; one row per (query, relevant_passage))
+{"query_id": "ood_q0001", "passage_id": "akorda_001_p03", "relevance": 1}
+```
+
+Upload all three (`passages.jsonl`, `queries.jsonl`, `qrels.jsonl`) to the
+benchmark repository under a new partition.
+
 ## Next steps after collection
 
-1. Upload `passages.jsonl` to the [benchmark repo](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) under a new partition (e.g. `confirmatory/`)
-2. Generate query candidates per passage via a free LLM API (Groq Llama 3.3 / Gemini Flash)
-3. Native-speaker validation: keep / rewrite / drop (target ≈150 final pairs)
-4. Re-run the existing dense/lexical pipelines on the new partition and compare category-level rankings against Wikipedia-n=300 results
+1. Upload `passages.jsonl` + `queries.jsonl` + `qrels.jsonl` to the [benchmark repo](https://huggingface.co/datasets/Tim2190/kaz-rag-search-benchmark) under a new partition (e.g. `confirmatory/`)
+2. Re-run the existing dense/lexical pipelines on the new partition and compare category-level rankings against Wikipedia-n=300 results

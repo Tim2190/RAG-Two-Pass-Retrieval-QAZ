@@ -3,6 +3,14 @@ data/passages.jsonl
 data/passages*.jsonl
 data/raw/
 
+# Query generation artifacts — also live in the benchmark repo
+data/candidates*.csv
+data/queries.jsonl
+data/qrels.jsonl
+
+# Secrets
+.env
+
 # Python
 __pycache__/
 *.pyc
